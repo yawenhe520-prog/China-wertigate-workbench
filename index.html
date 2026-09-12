@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>China wertigate · 智能项目中枢</title>
+  <link rel="stylesheet" href="src/styles.css" />
+  <link rel="stylesheet" href="src/workspace.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">W</div><div><strong>China wertigate</strong><span>智能项目中枢</span></div></div>
+      <div class="workspace-label">工作空间</div>
+      <button class="project-switcher" id="projectSwitcher"><span class="project-dot"></span><span><b>尚未导入文档</b><small>请先上传项目资料</small></span><span class="chevron">⌄</span></button>
+      <nav id="mainNav">
+        <button class="nav-item" data-page="analysis"><span class="nav-icon">⌁</span>文档分析</button>
+        <button class="nav-item active" data-page="overview"><span class="nav-icon">◈</span>项目总览</button>
+        <button class="nav-item" data-page="issues"><span class="nav-icon">⊙</span>问题闭环<span class="nav-badge">—</span></button>
+        <button class="nav-item" data-page="actions"><span class="nav-icon">☷</span>会议行动项<span class="nav-badge amber">—</span></button>
+        <button class="nav-item" data-page="risks"><span class="nav-icon">△</span>风险预警<span class="nav-badge red">—</span></button>
+        <button class="nav-item" data-page="report"><span class="nav-icon">▤</span>项目周报</button>
+      </nav>
+      <div class="sidebar-bottom"><div class="ai-status"><span class="pulse"></span><div><b>AI 尚未配置</b><small>导入后可先核对原文</small></div></div><button class="settings">⚙ 模型服务设置</button></div>
+    </aside>
+    <main class="main-content">
+      <header class="topbar"><div class="breadcrumbs"><span>项目空间</span><i>/</i><b id="pageTitle">项目总览</b></div><div class="top-actions"><button class="btn small" id="topSettings">模型设置</button><div class="avatar">何</div><span class="user-name">何雅雯 · 项目经理</span></div></header>
+      <div id="pageContainer"></div>
+    </main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <div id="modalRoot"></div>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="src/app.js"></script>
+  <script src="src/enhance.js"></script>
+  <script src="src/platform.js"></script>
+</body>
+</html>
