@@ -124,17 +124,21 @@ export function applyReview(candidate, review) {
   return { documentType: review.documentType, project, ...grouped, warnings: [...new Set(warnings)] };
 }
 
-export function createAnalysisService({ fetchImpl = fetch, env = process.env, timeoutMs = 120000 } = {}) {
+export function createAnalysisService({ fetchImpl = fetch, env = process.env, timeoutMs = 120000, allowClientConfig = env.VERCEL !== '1' && env.NODE_ENV !== 'production' } = {}) {
   let config = { provider: 'deepseek', model: env.DEEPSEEK_MODEL || 'deepseek-flash', apiKey: env.DEEPSEEK_API_KEY || '' };
-  const getConfig = () => ({ configured: Boolean(config.apiKey), provider: config.provider, model: config.model, providers: PROVIDERS });
+  const getConfig = () => ({ configured: Boolean(config.apiKey), provider: config.provider, model: config.model, providers: PROVIDERS, configurable: allowClientConfig, managed: !allowClientConfig });
   function setConfig(value) {
+    if (!allowClientConfig) throw new AppError(403, 'CONFIG_MANAGED_BY_ENV', '生产环境仅使用服务器环境变量 DEEPSEEK_API_KEY 和 DEEPSEEK_MODEL，网页不能修改共享模型配置。');
     if (!value || value.provider !== 'deepseek' || !text(value.model, 120) || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(value.model) || typeof value.apiKey !== 'string' || value.apiKey.length > 1000 || /[\r\n]/.test(value.apiKey)) {
       throw new AppError(400, 'INVALID_CONFIG', '请填写有效的服务商、模型名称和 API Key。');
     }
     config = { provider: value.provider, model: value.model, apiKey: value.apiKey.trim() || (value.provider === config.provider ? config.apiKey : '') };
     return getConfig();
   }
-  function clearConfig() { config = { ...config, apiKey: '' }; return getConfig(); }
+  function clearConfig() {
+    if (!allowClientConfig) throw new AppError(403, 'CONFIG_MANAGED_BY_ENV', '生产环境仅使用服务器环境变量，网页不能清除共享模型配置。');
+    config = { ...config, apiKey: '' }; return getConfig();
+  }
   function requireConfig() {
     if (!config.apiKey) throw new AppError(503, 'MODEL_NOT_CONFIGURED', '尚未连接模型服务。请先在“模型连接”中配置并测试连接；未生成任何模拟结论。');
     return { ...config };

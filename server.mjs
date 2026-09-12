@@ -26,44 +26,74 @@ async function readJson(request) {
   catch { throw new AppError(400, 'INVALID_JSON', '请求内容不是有效的 JSON。'); }
 }
 
-export function createAppServer({ service = createAnalysisService(), root = rootDirectory } = {}) {
-  const server = http.createServer(async (request, response) => {
-    try {
-      const port = server.address()?.port;
-      const hosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`]);
-      const host = request.headers.host;
-      const origin = request.headers.origin;
-      if (!hosts.has(host) || (origin && ![`http://localhost:${port}`, `http://127.0.0.1:${port}`].includes(origin))) throw new AppError(403, 'LOCAL_ACCESS_ONLY', '仅允许从本机工作台访问。');
-      const url = new URL(request.url, `http://${host}`);
-      if (url.pathname.startsWith('/api/')) {
-        if (request.method === 'GET' && url.pathname === '/api/config') return reply(response, 200, service.getConfig());
-        if (!origin) throw new AppError(403, 'ORIGIN_REQUIRED', '请通过本机工作台发起操作。');
-        if (request.method === 'DELETE' && url.pathname === '/api/config') return reply(response, 200, service.clearConfig());
-        if (request.method === 'POST') {
-          const body = await readJson(request);
-          if (url.pathname === '/api/config') return reply(response, 200, service.setConfig(body));
-          if (url.pathname === '/api/test' || url.pathname === '/api/config/test') return reply(response, 200, await service.testConnection());
-          if (url.pathname === '/api/analyze') return reply(response, 200, await service.analyze(body));
-        }
-        throw new AppError(404, 'NOT_FOUND', '接口不存在。');
+function cleanHost(value) { return String(value || '').trim().toLowerCase().replace(/\.$/, ''); }
+
+function deploymentHosts(env) {
+  return [env.VERCEL_URL, env.VERCEL_PROJECT_PRODUCTION_URL, env.VERCEL_BRANCH_URL, env.PUBLIC_APP_HOST]
+    .filter(Boolean).map(value => cleanHost(value).replace(/^https?:\/\//, '').split('/')[0]);
+}
+
+function isVercelHost(host) { return /^[a-z0-9][a-z0-9-]*\.vercel\.app(?::\d+)?$/.test(host); }
+
+function requestHost(request) {
+  const forwarded = request.headers['x-forwarded-host'];
+  return cleanHost(Array.isArray(forwarded) ? forwarded[0] : forwarded || request.headers.host);
+}
+
+function requestOriginAllowed(origin, host, port, env) {
+  if (!origin) return false;
+  let parsed;
+  try { parsed = new URL(origin); } catch { return false; }
+  const originHost = cleanHost(parsed.host);
+  const localHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`, 'localhost', '127.0.0.1']);
+  if (env.VERCEL !== '1' && env.NODE_ENV !== 'production') return parsed.protocol === 'http:' && localHosts.has(originHost);
+  return parsed.protocol === 'https:' && (deploymentHosts(env).includes(originHost) || (originHost === host && isVercelHost(originHost)));
+}
+
+function hostAllowed(host, port, env) {
+  const localHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`, 'localhost', '127.0.0.1']);
+  if (env.VERCEL !== '1' && env.NODE_ENV !== 'production') return localHosts.has(host);
+  return deploymentHosts(env).includes(host) || isVercelHost(host);
+}
+
+async function handleRequest(request, response, { service, root, env, port }) {
+  try {
+    const host = requestHost(request);
+    const origin = request.headers.origin;
+    if (!hostAllowed(host, port, env) || (origin && !requestOriginAllowed(origin, host, port, env))) throw new AppError(403, 'ORIGIN_NOT_ALLOWED', '请求来源未获允许。');
+    const url = new URL(request.url, `${env.VERCEL === '1' ? 'https' : 'http'}://${host}`);
+    if (url.pathname.startsWith('/api/')) {
+      if (request.method === 'GET' && url.pathname === '/api/config') return reply(response, 200, service.getConfig());
+      if (!origin || !requestOriginAllowed(origin, host, port, env)) throw new AppError(403, 'ORIGIN_REQUIRED', '请通过受信任的同源页面发起操作。');
+      if (request.method === 'DELETE' && url.pathname === '/api/config') return reply(response, 200, service.clearConfig());
+      if (request.method === 'POST') {
+        const body = await readJson(request);
+        if (url.pathname === '/api/config') return reply(response, 200, service.setConfig(body));
+        if (url.pathname === '/api/test' || url.pathname === '/api/config/test') return reply(response, 200, await service.testConnection());
+        if (url.pathname === '/api/analyze') return reply(response, 200, await service.analyze(body));
       }
-      if (!['GET', 'HEAD'].includes(request.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', '不支持此操作。');
-      const relative = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-      if (!(relative === 'index.html' || /^src\/[a-zA-Z0-9._-]+\.(?:js|css)$/.test(relative) || relative === 'vendor/jszip.min.js')) throw new AppError(404, 'NOT_FOUND', '文件不存在。');
-      let file;
-      try {
-        file = await realpath(resolve(root, relative));
-        if (!file.startsWith(`${resolve(root)}${sep}`)) throw new Error();
-      } catch { throw new AppError(404, 'NOT_FOUND', '文件不存在。'); }
-      const data = await readFile(file);
-      const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }[extname(file)] || 'application/octet-stream';
-      response.writeHead(200, { 'Content-Type': `${mime}; charset=utf-8`, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
-      response.end(request.method === 'HEAD' ? undefined : data);
-    } catch (error) {
-      if (!response.headersSent) reply(response, error instanceof AppError ? error.status : 500, { error: { code: error instanceof AppError ? error.code : 'INTERNAL_ERROR', message: error instanceof AppError ? error.message : '本地服务处理失败，请重试。' } });
-      else response.end();
+      throw new AppError(404, 'NOT_FOUND', '接口不存在。');
     }
-  });
+    if (!['GET', 'HEAD'].includes(request.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', '不支持此操作。');
+    const relative = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+    if (!(relative === 'index.html' || /^src\/[a-zA-Z0-9._-]+\.(?:js|css)$/.test(relative) || relative === 'vendor/jszip.min.js')) throw new AppError(404, 'NOT_FOUND', '文件不存在。');
+    let file;
+    try {
+      file = await realpath(resolve(root, relative));
+      if (!file.startsWith(`${resolve(root)}${sep}`)) throw new Error();
+    } catch { throw new AppError(404, 'NOT_FOUND', '文件不存在。'); }
+    const data = await readFile(file);
+    const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }[extname(file)] || 'application/octet-stream';
+    response.writeHead(200, { 'Content-Type': `${mime}; charset=utf-8`, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+    response.end(request.method === 'HEAD' ? undefined : data);
+  } catch (error) {
+    if (!response.headersSent) reply(response, error instanceof AppError ? error.status : 500, { error: { code: error instanceof AppError ? error.code : 'INTERNAL_ERROR', message: error instanceof AppError ? error.message : '本地服务处理失败，请重试。' } });
+    else response.end();
+  }
+}
+
+export function createAppServer({ service = createAnalysisService(), root = rootDirectory, env = process.env } = {}) {
+  const server = http.createServer((request, response) => handleRequest(request, response, { service, root, env, port: server.address()?.port }));
   server.requestTimeout = 300000;
   server.headersTimeout = 15000;
   return server;
@@ -75,6 +105,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   else {
     const server = createAppServer();
     server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? '端口已占用：请关闭已有工作台服务，或使用其他 PORT。' : '本地服务未能启动。'); process.exitCode = 1; });
-    server.listen(port, '127.0.0.1', () => console.log(`China wertigate 已启动：http://127.0.0.1:${port}`));
+    server.listen(port, () => console.log(`China wertigate 已启动：http://127.0.0.1:${port}`));
   }
+}
+
+const vercelService = createAnalysisService({ env: process.env, allowClientConfig: false });
+export default function vercelHandler(request, response) {
+  return handleRequest(request, response, { service: vercelService, root: rootDirectory, env: process.env, port: undefined });
 }

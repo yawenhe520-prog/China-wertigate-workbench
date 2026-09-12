@@ -1,6 +1,6 @@
 # China wertigate 智能项目中枢
 
-这是一个面向汽车研发会议纪要和项目问题清单的本地联网工作台。它先在浏览器内提取 DOCX / TXT / MD / CSV 的正文并保留段落、表格行和空单元格位置，再由你配置的 DeepSeek 模型完成两轮语义识别与证据复核。
+这是一个面向汽车研发会议纪要和项目问题清单的 Node.js 工作台。它先在浏览器内提取 DOCX / TXT / MD / CSV 的正文并保留段落、表格行和空单元格位置，再由 DeepSeek 完成两轮语义识别与证据复核。项目既可本地运行，也可部署到 Vercel。
 
 ## 启动
 
@@ -10,7 +10,15 @@
 npm start
 ```
 
-不要直接用 `file://` 页面进行联网分析；本地文件页只能读取和核对原文。第一次使用请在“模型服务设置”输入你自己的 DeepSeek API Key 并测试连接。密钥只在本地服务内存中保存，重启后需要重新输入，不会写入仓库或浏览器工作区。
+不要直接用 `file://` 页面进行联网分析；本地文件页只能读取和核对原文。第一次使用请在“模型服务设置”输入你自己的 DeepSeek API Key 并测试连接。开发模式下密钥只在本地服务内存中保存，重启后需要重新输入，不会写入仓库或浏览器工作区。
+
+## 部署到 Vercel
+
+将仓库根目录导入 Vercel，保持 `server.mjs`、`index.html`、`src/`、`vendor/` 和 `server/` 的目录结构。项目根目录的 `vercel.json` 会把这些资源包含到 Vercel 的 Node.js 服务函数中；Vercel 会识别根目录的 `server.mjs` 并把它作为 Node.js 服务入口。无需把 API Key 写入代码或前端。
+
+在 Vercel 项目 Settings → Environment Variables 中添加 `DEEPSEEK_API_KEY`，并可添加 `DEEPSEEK_MODEL`（默认 `deepseek-flash`），然后重新部署。生产环境的 `/api/config` 只返回是否已配置、服务商和模型名称，不返回密钥；生产环境会拒绝网页提交的 `POST /api/config` 和 `DELETE /api/config`，避免不同用户覆盖共享密钥。请求只接受当前 Vercel 域名（以及由 `PUBLIC_APP_HOST` 指定的自定义域名）的 HTTPS 同源请求。
+
+Vercel 部署使用服务器环境变量，网页设置窗口仅显示配置来源。用户上传的文档仍在各自浏览器中解析并保存在各自浏览器的 `localStorage`，分析文本会发送到你的 DeepSeek 账户；当前版本没有用户登录、团队隔离、数据库或公网项目数据同步，不适合直接作为多租户系统使用。
 
 ## 使用方式
 
@@ -32,39 +40,6 @@ npm test
 
 安装开发依赖 `npm install` 后运行 `npm run test:browser`，验证 DOCX/CSV 解析及网页的导入、引用定位、编辑、确认发布、刷新持久化和失败重试流程。浏览器测试默认使用 macOS Google Chrome；可通过 `CHROME_PATH` 指定其他 Chrome 可执行文件。
 
-实际模型的识别效果需要用已知问题和已确认行动项的真实纪要对照验证。自动化测试不代表真实模型准确率。文档中缺失的信息、工程参数的真实性与跨文档版本冲突不能仅凭一次分析保证。
+暂未配置真实模型账号，因此尚未完成真实服务的联调或项目文档准确率评估。模型接通后应先用已知问题及已确认行动项的真实纪要对照验证。文档中缺失的信息、工程参数的真实性与跨文档版本冲突不能仅凭这次分析保证。
 
-## 文件结构
-
-```text
-China-wertigate-workbench/
-├── README.md                 # 中文使用与上传说明
-├── package.json              # 启动命令与测试依赖
-├── index.html                # 网页入口
-├── src/                      # 页面逻辑、文档读取和样式
-├── server.mjs                # 本机 HTTP 服务入口
-├── server/                   # 模型分析和接口说明
-├── vendor/                   # JSZip 解析库及第三方许可
-├── tests/                    # 后端、解析和交互测试
-├── start.command             # macOS 启动脚本
-├── .env.example              # 空密钥的环境变量示例
-└── .gitignore                # Git 忽略规则
-```
-
-启动运行不需要安装 npm 依赖；浏览器测试依赖通过 `npm install` 安装。若 `start.command` 没有执行权限，可在终端执行 `npm start`。端口已占用时，可使用已经运行的工作台地址；若要从本文件夹重新启动，先在原服务终端按 Control+C。
-
-## 自行上传 GitHub
-
-将本文件夹**内部的文件和子文件夹**放到仓库根目录，保留 `src/`、`server/`、`vendor/` 和 `tests/` 的层级。不要仅上传 ZIP 文件，否则仓库里只能看到压缩包。
-
-macOS Finder 默认隐藏 `.gitignore` 和 `.env.example`，可按 Command+Shift+. 显示。使用网页上传时应确认这两个文件也已加入；GitHub Desktop 会读取 `.gitignore`。
-
-GitHub 仓库用于保存和共享源码。完整工作台需要本机 Node.js 服务与自己的模型 API 配置；GitHub Pages 只能提供静态网页，不能运行这里的分析后端。当前服务只监听本机地址，没有实现公网多用户部署。
-
-## 本地项目数据
-
-项目文档、编辑记录和报告保存在当前浏览器的 `localStorage` 中，不在源码文件夹或 ZIP 包内。备份这些资料请使用页面左上角“文档工作区”中的“导出工作区备份”；恢复时使用同一菜单。源码更新不替代项目数据备份。
-
-模型密钥由你在设置窗口填写，源码包仅含空值示例。`.env.example` 用于说明支持的环境变量，服务不会自动读取 `.env` 文件。
-
-第三方许可见 `vendor/THIRD_PARTY_NOTICES.md`。
+Vercel 部署后的 URL 可以直接使用完整功能。GitHub Pages 等静态托管只能展示页面，不能运行这里的 Node.js 分析服务。
